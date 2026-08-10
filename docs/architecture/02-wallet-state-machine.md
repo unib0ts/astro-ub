@@ -582,3 +582,5 @@ Credit astrologer wallet with idempotency `${sessionId}:earning`. Platform fee c
 - Cross-DB Mongo transactions spanning `core` + `wallet` — use **HTTP saga** + compensation  
 - Bill per message / per WebRTC packet  
 - Assume parallel chat+call stacked rates until marketing locks that product rule  
+
+{% include mermaid.html %}
