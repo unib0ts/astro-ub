@@ -1,0 +1,78 @@
+<!-- Mermaid loader for GitHub Pages (site root = /docs) -->
+<script>
+(function () {
+  if (window.__astroMermaidBooted) return;
+  window.__astroMermaidBooted = true;
+
+  function showError(msg) {
+    console.error(msg);
+    var note = document.createElement("p");
+    note.style.color = "#cf222e";
+    note.textContent = "Mermaid diagrams failed to render: " + msg;
+    var first = document.querySelector("pre code.language-mermaid");
+    if (first && first.parentNode) {
+      first.parentNode.parentNode.insertBefore(note, first.parentNode);
+    }
+  }
+
+  function renderMermaid() {
+    if (typeof mermaid === "undefined") {
+      showError("library not loaded (CDN blocked?)");
+      return;
+    }
+
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "default",
+      securityLevel: "loose",
+      flowchart: { htmlLabels: true }
+    });
+
+    var blocks = document.querySelectorAll("pre code.language-mermaid");
+    var graphs = [];
+    for (var i = 0; i < blocks.length; i++) {
+      var code = blocks[i];
+      var pre = code.parentNode;
+      if (!pre || !pre.parentNode) continue;
+      var div = document.createElement("div");
+      div.className = "mermaid";
+      div.textContent = code.textContent;
+      pre.parentNode.replaceChild(div, pre);
+      graphs.push(div);
+    }
+
+    if (!graphs.length) return;
+
+    try {
+      if (typeof mermaid.run === "function") {
+        mermaid.run({ nodes: graphs });
+      } else {
+        mermaid.init(undefined, graphs);
+      }
+    } catch (e) {
+      showError(e && e.message ? e.message : String(e));
+    }
+  }
+
+  var s = document.createElement("script");
+  s.src = "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js";
+  s.async = false;
+  s.onload = renderMermaid;
+  s.onerror = function () {
+    showError("could not download mermaid.min.js from jsDelivr");
+  };
+  document.head.appendChild(s);
+})();
+</script>
+<style>
+  .mermaid {
+    margin: 1.25rem 0;
+    overflow-x: auto;
+    text-align: center;
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 1rem;
+  }
+  .mermaid svg { max-width: 100%; height: auto; }
+</style>

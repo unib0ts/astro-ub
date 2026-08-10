@@ -10,6 +10,10 @@ Backend architecture and MVP contracts for an Astrotalk-style astrology consulta
 
 ## Docs
 
+Published site (GitHub Pages source = `/docs` folder):
+
+- Wallet flows: https://unib0ts.github.io/astro-ub/architecture/02-wallet-state-machine.html
+
 | Doc | What it covers |
 |-----|----------------|
 | [Architecture overview](docs/architecture/00-overview.md) | Services, auth, data ownership, MVP scope |

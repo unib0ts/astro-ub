@@ -583,15 +583,35 @@ Credit astrologer wallet with idempotency `${sessionId}:earning`. Platform fee c
 - Bill per message / per WebRTC packet  
 - Assume parallel chat+call stacked rates until marketing locks that product rule  
 
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
 <script>
 (function () {
-  if (window.__astroMermaidDone) return;
-  window.__astroMermaidDone = true;
+  if (window.__astroMermaidBooted) return;
+  window.__astroMermaidBooted = true;
+
+  function showError(msg) {
+    console.error(msg);
+    var note = document.createElement("p");
+    note.style.color = "#cf222e";
+    note.textContent = "Mermaid diagrams failed to render: " + msg;
+    var first = document.querySelector("pre code.language-mermaid");
+    if (first && first.parentNode && first.parentNode.parentNode) {
+      first.parentNode.parentNode.insertBefore(note, first.parentNode);
+    }
+  }
+
   function renderMermaid() {
-    if (typeof mermaid === "undefined") return;
-    mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "loose", flowchart: { htmlLabels: true } });
+    if (typeof mermaid === "undefined") {
+      showError("library not loaded (CDN blocked?)");
+      return;
+    }
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "default",
+      securityLevel: "loose",
+      flowchart: { htmlLabels: true }
+    });
     var blocks = document.querySelectorAll("pre code.language-mermaid");
+    var graphs = [];
     for (var i = 0; i < blocks.length; i++) {
       var code = blocks[i];
       var pre = code.parentNode;
@@ -600,12 +620,22 @@ Credit astrologer wallet with idempotency `${sessionId}:earning`. Platform fee c
       div.className = "mermaid";
       div.textContent = code.textContent;
       pre.parentNode.replaceChild(div, pre);
+      graphs.push(div);
     }
-    var graphs = document.querySelectorAll("div.mermaid");
-    if (graphs.length) mermaid.init(undefined, graphs);
+    if (!graphs.length) return;
+    try {
+      if (typeof mermaid.run === "function") mermaid.run({ nodes: graphs });
+      else mermaid.init(undefined, graphs);
+    } catch (e) {
+      showError(e && e.message ? e.message : String(e));
+    }
   }
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", renderMermaid);
-  else renderMermaid();
+
+  var s = document.createElement("script");
+  s.src = "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js";
+  s.onload = renderMermaid;
+  s.onerror = function () { showError("could not download mermaid.min.js from jsDelivr"); };
+  document.head.appendChild(s);
 })();
 </script>
 <style>
