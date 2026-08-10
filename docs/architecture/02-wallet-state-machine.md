@@ -20,11 +20,11 @@ flowchart LR
   end
 
   GW[api-gateway]
-  CORE[core-api<br/>sessions / rates]
-  WALLET[wallet service<br/>coins truth]
+  CORE["core-api<br/>sessions / rates"]
+  WALLET["wallet service<br/>coins truth"]
   CHAT[chat service]
-  CALL[call service<br/>voice + video]
-  WORK[worker<br/>per-minute tick]
+  CALL["call service<br/>voice + video"]
+  WORK["worker<br/>per-minute tick"]
 
   U --> GW
   A --> GW
@@ -34,10 +34,10 @@ flowchart LR
   GW --> CALL
 
   CORE -->|"hold / capture / close / credit"| WALLET
-  CORE -->|"type=chat → createRoom"| CHAT
-  CORE -->|"type=audio|video → create"| CALL
+  CORE -->|"type=chat -> createRoom"| CHAT
+  CORE -->|"type=audio|video -> create"| CALL
   WORK -->|"capture each minute"| WALLET
-  WORK -->|"low balance → end"| CORE
+  WORK -->|"low balance -> end"| CORE
 
   CHAT -.->|"never mutates coins"| WALLET
   CALL -.->|"never mutates coins"| WALLET
@@ -55,11 +55,11 @@ flowchart LR
 ```mermaid
 flowchart TB
   PO[payment_orders]
-  AC[wallet_accounts<br/>balance / held / version]
-  HD[wallet_holds<br/>amount / captured / released]
-  LG[wallet_ledger<br/>append-only history]
+  AC["wallet_accounts<br/>balance / held / version"]
+  HD["wallet_holds<br/>amount / captured / released"]
+  LG["wallet_ledger<br/>append-only history"]
 
-  PO -->|"webhook paid → credit"| LG
+  PO -->|"webhook paid -> credit"| LG
   LG -->|"same txn updates projection"| AC
   HD -->|"open hold tracks session reserve"| AC
   LG -->|"hold / capture / release / credit rows"| HD
@@ -84,13 +84,13 @@ flowchart LR
     H[held]
   end
 
-  R[Recharge credit] -->|balance ↑| B
-  S[Session hold] -->|balance ↓ held ↑| B
+  R[Recharge credit] -->|"balance up"| B
+  S[Session hold] -->|"balance down, held up"| B
   S --> H
-  C[Per-minute capture] -->|held ↓ spent| H
-  E[Session end release] -->|held ↓ balance ↑| H
+  C[Per-minute capture] -->|"held down = spent"| H
+  E[Session end release] -->|"held down, balance up"| H
   E --> B
-  P[Astrologer earning credit] -->|astro balance ↑| B
+  P[Astrologer earning credit] -->|"astro balance up"| B
 ```
 
 | Ledger `type` | `balance` | `held` | Meaning |
@@ -117,7 +117,7 @@ flowchart TB
   CALL_V --> MEDIA_CALL[Media: call service]
   CALL_VD --> MEDIA_CALL
 
-  MEDIA_CHAT --> SAME[Same wallet path:<br/>hold → capture/min → release]
+  MEDIA_CHAT --> SAME["Same wallet path:<br/>hold -> capture/min -> release"]
   MEDIA_CALL --> SAME
 ```
 
@@ -138,35 +138,37 @@ sequenceDiagram
   participant GW as Gateway
   participant Core as core-api
   participant W as wallet
-  participant Media as chat OR call
+  participant Media as chat or call
   participant Worker as worker
 
-  App->>GW: POST /v1/sessions { type, astrologerId }<br/>Idempotency-Key
-  GW->>Core: forward + actor headers
-  Core->>Core: gates (approved, online, !busy, balance path)
-  Core->>W: POST /internal/holds (MIN_MINUTES × rate)
+  App->>GW: POST /v1/sessions + Idempotency-Key
+  GW->>Core: forward actor headers
+  Core->>Core: gates approved online not busy
+  Core->>W: POST /internal/holds MIN_MINUTES * rate
   alt insufficient balance
     W-->>Core: WALLET_INSUFFICIENT
     Core-->>App: 402
   else hold ok
     W-->>Core: holdId
     Core->>Core: insert session active + snapshot rate
-    Core->>Media: createRoom / createCall
+    Core->>Media: createRoom or createCall
     Core-->>App: session + mediaToken
-    Note over Worker,W: Minute 0 capture on start (or first tick)
-    loop every ~60s while active
-      Worker->>W: capture(rate) key=sessionId:capture:N
-      alt hold exhausted
+    Note over Worker,W: Minute 0 capture on start or first tick
+    loop every 60s while active
+      Worker->>W: capture rate key sessionId:capture:N
+      alt capture ok
+        W-->>Worker: ok
+      else hold exhausted
         Worker->>W: try extendHold once
-        else still short
-          Worker->>Core: endSession(low_balance)
+        alt still short
+          Worker->>Core: endSession low_balance
+        end
       end
-      W-->>Worker: ok
     end
     App->>Core: POST /v1/sessions/:id/end
-    Core->>W: closeHold → release remainder
-    Core->>W: credit astrologer (totalCharged − fee)
-    Core->>Media: close room / end call
+    Core->>W: closeHold release remainder
+    Core->>W: credit astrologer totalCharged minus fee
+    Core->>Media: close room or end call
     Core-->>App: session ended + totals
   end
 ```
@@ -176,10 +178,10 @@ sequenceDiagram
 ```mermaid
 stateDiagram-v2
   [*] --> none
-  none --> open: hold(amount)<br/>ledger: hold
-  open --> open: capture(rate) each minute<br/>ledger: capture<br/>captured ↑ held ↓
-  open --> open: extendHold (optional)<br/>ledger: hold again<br/>amount ↑
-  open --> closed: closeHold<br/>ledger: release remainder
+  none --> open: hold amount / ledger hold
+  open --> open: capture each minute / held down
+  open --> open: extendHold optional / amount up
+  open --> closed: closeHold / release remainder
   closed --> [*]
 ```
 
@@ -194,22 +196,11 @@ Invariants while `open`:
 “Realtime” means a **billing clock**, not deducting on every message.
 
 ```mermaid
-gantt
-  title Example: 20 coins/min, hold 5 min = 100 coins
-  dateFormat  mm:ss
-  axisFormat  %M:%S
-
-  section Account
-  balance 200→100 after hold     :done, a1, 00:00, 00:01
-  held 100 then shrinks          :active, a2, 00:00, 03:00
-
-  section Captures
-  min0 capture 20                :crit, c0, 00:00, 00:01
-  min1 capture 20                :crit, c1, 01:00, 01:01
-  min2 capture 20                :crit, c2, 02:00, 02:01
-
-  section End
-  release leftover 40            :c3, 02:30, 02:31
+flowchart LR
+  H0["Start<br/>hold 100<br/>bal 100 / held 100"] --> C0["t=0<br/>capture 20<br/>held 80"]
+  C0 --> C1["t=60s<br/>capture 20<br/>held 60"]
+  C1 --> C2["t=120s<br/>capture 20<br/>held 40"]
+  C2 --> END["End ~2.5m<br/>release 40<br/>bal 140 / held 0"]
 ```
 
 Same example as a table (rate = 20, start balance = 200, hold = 100):
@@ -241,16 +232,16 @@ Retries must replay the same result — never double-charge.
 sequenceDiagram
   participant App
   participant Wallet
-  participant PSP as Razorpay / PSP
+  participant PSP as Razorpay or PSP
 
-  App->>Wallet: POST /v1/wallet/recharge { amount }
+  App->>Wallet: POST /v1/wallet/recharge amount
   Wallet->>Wallet: payment_orders status=created
   Wallet->>PSP: create order
   Wallet-->>App: providerPayload
   App->>PSP: pay in SDK
-  PSP->>Wallet: webhook paid (signature verify)
-  Wallet->>Wallet: ledger credit + balance ↑ (idempotent)
-  Wallet-->>App: push / next GET /v1/wallet shows new balance
+  PSP->>Wallet: webhook paid signature verify
+  Wallet->>Wallet: ledger credit + balance up idempotent
+  Wallet-->>App: push or GET /v1/wallet new balance
 ```
 
 Never trust the client “payment success” callback alone; **webhook (or server verify)** is authoritative.
@@ -260,7 +251,7 @@ Never trust the client “payment success” callback alone; **webhook (or serve
 ```mermaid
 flowchart TD
   A[core: validate + pick rate] --> B[wallet: hold]
-  B -->|fail| X[Abort — no session]
+  B -->|fail| X[Abort - no session]
   B -->|ok| C[core: insert session]
   C -->|fail| D[Compensate: wallet closeHold]
   C -->|ok| E[media create]
