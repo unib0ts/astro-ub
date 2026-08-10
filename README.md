@@ -12,7 +12,10 @@ Backend architecture and MVP contracts for an Astrotalk-style astrology consulta
 
 Published site (GitHub Pages source = `/docs` folder):
 
+- Home: https://unib0ts.github.io/astro-ub/
 - Wallet flows: https://unib0ts.github.io/astro-ub/architecture/02-wallet-state-machine.html
+
+Keep the repo name **`astro-ub`** (cleaner than `astro-ub.github.io`). Keep Pages source as **`/docs`**. The site root is the contents of `docs/`, so homepage lives at `docs/index.md`.
 
 | Doc | What it covers |
 |-----|----------------|
