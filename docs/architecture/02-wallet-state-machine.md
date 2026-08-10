@@ -583,4 +583,32 @@ Credit astrologer wallet with idempotency `${sessionId}:earning`. Platform fee c
 - Bill per message / per WebRTC packet  
 - Assume parallel chat+call stacked rates until marketing locks that product rule  
 
-{% include mermaid.html %}
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>
+(function () {
+  if (window.__astroMermaidDone) return;
+  window.__astroMermaidDone = true;
+  function renderMermaid() {
+    if (typeof mermaid === "undefined") return;
+    mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "loose", flowchart: { htmlLabels: true } });
+    var blocks = document.querySelectorAll("pre code.language-mermaid");
+    for (var i = 0; i < blocks.length; i++) {
+      var code = blocks[i];
+      var pre = code.parentNode;
+      if (!pre || !pre.parentNode) continue;
+      var div = document.createElement("div");
+      div.className = "mermaid";
+      div.textContent = code.textContent;
+      pre.parentNode.replaceChild(div, pre);
+    }
+    var graphs = document.querySelectorAll("div.mermaid");
+    if (graphs.length) mermaid.init(undefined, graphs);
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", renderMermaid);
+  else renderMermaid();
+})();
+</script>
+<style>
+  .mermaid { margin: 1.25rem 0; overflow-x: auto; text-align: center; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1rem; }
+  .mermaid svg { max-width: 100%; height: auto; }
+</style>
