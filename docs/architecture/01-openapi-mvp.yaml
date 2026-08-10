@@ -1,0 +1,1316 @@
+openapi: 3.1.0
+info:
+  title: Astro Platform API
+  version: 1.0.0-mvp
+  description: |
+    Public (gateway) and internal contracts for the astrology consultation MVP.
+    Money amounts are integer **paise**. Timestamps are ISO-8601 UTC.
+servers:
+  - url: https://api.example.com
+    description: Production gateway
+  - url: http://localhost:8080
+    description: Local gateway
+tags:
+  - name: Auth
+  - name: Users
+  - name: Astrologers
+  - name: Catalog
+  - name: Sessions
+  - name: Reviews
+  - name: Wallet
+  - name: Admin
+  - name: Internal
+security:
+  - bearerAuth: []
+
+paths:
+  /v1/auth/otp/request:
+    post:
+      tags: [Auth]
+      summary: Request login OTP
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyOptional"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mobile, role]
+              properties:
+                mobile:
+                  type: string
+                  example: "9876543210"
+                role:
+                  $ref: "#/components/schemas/ActorRolePublic"
+      responses:
+        "200":
+          description: OTP sent (always opaque success to reduce enumeration)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, expiresInSec]
+                properties:
+                  ok: { type: boolean }
+                  expiresInSec: { type: integer, example: 300 }
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/auth/otp/verify:
+    post:
+      tags: [Auth]
+      summary: Verify OTP and issue tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mobile, role, otp, deviceId]
+              properties:
+                mobile: { type: string }
+                role: { $ref: "#/components/schemas/ActorRolePublic" }
+                otp: { type: string, minLength: 4, maxLength: 8 }
+                deviceId: { type: string }
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenPairWithActor"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate refresh token and issue new access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+                deviceId: { type: string }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenPair"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke current refresh session
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken: { type: string }
+      responses:
+        "204":
+          description: Logged out
+
+  /v1/users/me:
+    get:
+      tags: [Users]
+      summary: Get current user profile
+      x-required-role: user
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    patch:
+      tags: [Users]
+      summary: Update current user profile
+      x-required-role: user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserPatch"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /v1/users/me/family:
+    get:
+      tags: [Users]
+      summary: List family members
+      x-required-role: user
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/FamilyMember"
+    post:
+      tags: [Users]
+      summary: Add family member
+      x-required-role: user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FamilyMemberInput"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilyMember"
+
+  /v1/users/me/family/{memberId}:
+    patch:
+      tags: [Users]
+      x-required-role: user
+      parameters:
+        - $ref: "#/components/parameters/MemberId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FamilyMemberInput"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FamilyMember"
+    delete:
+      tags: [Users]
+      x-required-role: user
+      parameters:
+        - $ref: "#/components/parameters/MemberId"
+      responses:
+        "204":
+          description: Deleted
+
+  /v1/astrologers:
+    get:
+      tags: [Astrologers]
+      summary: Search/list approved astrologers
+      security: []
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: language
+          schema: { type: string }
+        - in: query
+          name: skill
+          schema: { type: string }
+        - in: query
+          name: priceTier
+          schema:
+            type: string
+            enum: [bronze, silver, gold]
+        - in: query
+          name: online
+          schema: { type: boolean }
+        - in: query
+          name: cursor
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AstrologerList"
+
+  /v1/astrologers/{astrologerId}:
+    get:
+      tags: [Astrologers]
+      summary: Public astrologer profile
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/AstrologerId"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AstrologerPublic"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/astrologers/me:
+    get:
+      tags: [Astrologers]
+      summary: Current astrologer profile (private)
+      x-required-role: astrologer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AstrologerPrivate"
+    patch:
+      tags: [Astrologers]
+      x-required-role: astrologer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AstrologerPatch"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AstrologerPrivate"
+
+  /v1/astrologers/me/presence:
+    put:
+      tags: [Astrologers]
+      summary: Set online presence (busy is owned by sessions)
+      x-required-role: astrologer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [isOnline]
+              properties:
+                isOnline: { type: boolean }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [isOnline, isBusy]
+                properties:
+                  isOnline: { type: boolean }
+                  isBusy: { type: boolean }
+
+  /v1/catalog/price-tiers:
+    get:
+      tags: [Catalog]
+      summary: Active price tiers and rates
+      security: []
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PriceTier"
+
+  /v1/sessions:
+    get:
+      tags: [Sessions]
+      summary: List my sessions
+      description: Role from JWT scopes the filter (user or astrologer).
+      parameters:
+        - in: query
+          name: status
+          schema:
+            $ref: "#/components/schemas/SessionStatus"
+        - in: query
+          name: cursor
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 50 }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionList"
+    post:
+      tags: [Sessions]
+      summary: Start a consultation session
+      x-required-role: user
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [astrologerId, type]
+              properties:
+                astrologerId:
+                  $ref: "#/components/schemas/ObjectIdString"
+                type:
+                  $ref: "#/components/schemas/SessionType"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionStartResponse"
+        "402":
+          description: Insufficient wallet balance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Astrologer busy/offline/banned or conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/sessions/{sessionId}:
+    get:
+      tags: [Sessions]
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/sessions/{sessionId}/end:
+    post:
+      tags: [Sessions]
+      summary: End an active session
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  enum: [user, astrologer]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/reviews:
+    post:
+      tags: [Reviews]
+      summary: Review a completed session
+      x-required-role: user
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyOptional"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, rating]
+              properties:
+                sessionId:
+                  $ref: "#/components/schemas/ObjectIdString"
+                rating:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                comment:
+                  type: string
+                  maxLength: 2000
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Review"
+        "409":
+          description: Already reviewed or session not ended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/astrologers/{astrologerId}/reviews:
+    get:
+      tags: [Reviews]
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/AstrologerId"
+        - in: query
+          name: cursor
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 50 }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewList"
+
+  /v1/wallet:
+    get:
+      tags: [Wallet]
+      summary: Get authoritative wallet balances
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletBalance"
+
+  /v1/wallet/ledger:
+    get:
+      tags: [Wallet]
+      summary: Paginated ledger
+      parameters:
+        - in: query
+          name: cursor
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerList"
+
+  /v1/wallet/recharge:
+    post:
+      tags: [Wallet]
+      summary: Create PSP recharge order
+      x-required-role: user
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount:
+                  type: integer
+                  minimum: 1000
+                  description: Paise (min ₹10)
+                provider:
+                  type: string
+                  enum: [razorpay, cashfree]
+                  default: razorpay
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RechargeOrder"
+
+  /v1/wallet/webhooks/{provider}:
+    post:
+      tags: [Wallet]
+      summary: PSP webhook
+      security: []
+      parameters:
+        - in: path
+          name: provider
+          required: true
+          schema:
+            type: string
+            enum: [razorpay, cashfree]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+
+  /v1/admin/astrologers/{astrologerId}/status:
+    post:
+      tags: [Admin]
+      summary: Approve / reject / suspend astrologer
+      x-required-role: admin
+      parameters:
+        - $ref: "#/components/parameters/AstrologerId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [approved, rejected, suspended, pending]
+                rejectedReason: { type: string }
+                priceTier:
+                  type: string
+                  enum: [bronze, silver, gold]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AstrologerPrivate"
+
+  /v1/admin/users/{userId}/block:
+    post:
+      tags: [Admin]
+      x-required-role: admin
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            $ref: "#/components/schemas/ObjectIdString"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [isBlocked]
+              properties:
+                isBlocked: { type: boolean }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [userId, isBlocked]
+                properties:
+                  userId: { $ref: "#/components/schemas/ObjectIdString" }
+                  isBlocked: { type: boolean }
+
+  /v1/admin/astrologers/{astrologerId}/ban:
+    post:
+      tags: [Admin]
+      x-required-role: admin
+      parameters:
+        - $ref: "#/components/parameters/AstrologerId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [isBanned]
+              properties:
+                isBanned: { type: boolean }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [astrologerId, isBanned]
+                properties:
+                  astrologerId: { $ref: "#/components/schemas/ObjectIdString" }
+                  isBanned: { type: boolean }
+
+  /v1/admin/price-tiers:
+    put:
+      tags: [Admin]
+      summary: Upsert price tier rates
+      x-required-role: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PriceTier"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceTier"
+
+  # --- Internal (service network only; NOT on public gateway) ---
+  /internal/holds:
+    post:
+      tags: [Internal]
+      summary: Create wallet hold
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ownerType, ownerId, amount, sessionId]
+              properties:
+                ownerType:
+                  type: string
+                  enum: [user]
+                ownerId:
+                  $ref: "#/components/schemas/ObjectIdString"
+                amount:
+                  type: integer
+                  minimum: 1
+                sessionId:
+                  $ref: "#/components/schemas/ObjectIdString"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Hold"
+        "402":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /internal/holds/{holdId}/capture:
+    post:
+      tags: [Internal]
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: "#/components/parameters/HoldId"
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, sessionId]
+              properties:
+                amount: { type: integer, minimum: 1 }
+                sessionId: { $ref: "#/components/schemas/ObjectIdString" }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Hold"
+        "402":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /internal/holds/{holdId}/close:
+    post:
+      tags: [Internal]
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: "#/components/parameters/HoldId"
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sessionId: { $ref: "#/components/schemas/ObjectIdString" }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Hold"
+
+  /internal/credits:
+    post:
+      tags: [Internal]
+      summary: Credit an account (earning, promo)
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ownerType, ownerId, amount, reason, refType, refId]
+              properties:
+                ownerType:
+                  type: string
+                  enum: [user, astrologer]
+                ownerId: { $ref: "#/components/schemas/ObjectIdString" }
+                amount: { type: integer, minimum: 1 }
+                reason:
+                  type: string
+                  enum: [session_earning, promo, refund, adjustment]
+                refType:
+                  type: string
+                  enum: [session, payment, payout, admin]
+                refId: { type: string }
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerEntry"
+
+  /internal/sessions/{sessionId}/validate-media:
+    post:
+      tags: [Internal]
+      summary: Optional introspect for chat/call on join
+      security:
+        - serviceAuth: []
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actorId, mediaToken]
+              properties:
+                actorId: { $ref: "#/components/schemas/ObjectIdString" }
+                mediaToken: { type: string }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, sessionId, type, status]
+                properties:
+                  ok: { type: boolean }
+                  sessionId: { $ref: "#/components/schemas/ObjectIdString" }
+                  type: { $ref: "#/components/schemas/SessionType" }
+                  status: { $ref: "#/components/schemas/SessionStatus" }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    serviceAuth:
+      type: http
+      scheme: bearer
+      description: Service-to-service token
+
+  parameters:
+    IdempotencyKeyRequired:
+      in: header
+      name: Idempotency-Key
+      required: true
+      schema: { type: string, minLength: 8, maxLength: 128 }
+    IdempotencyKeyOptional:
+      in: header
+      name: Idempotency-Key
+      required: false
+      schema: { type: string, minLength: 8, maxLength: 128 }
+    MemberId:
+      in: path
+      name: memberId
+      required: true
+      schema: { $ref: "#/components/schemas/ObjectIdString" }
+    AstrologerId:
+      in: path
+      name: astrologerId
+      required: true
+      schema: { $ref: "#/components/schemas/ObjectIdString" }
+    SessionId:
+      in: path
+      name: sessionId
+      required: true
+      schema: { $ref: "#/components/schemas/ObjectIdString" }
+    HoldId:
+      in: path
+      name: holdId
+      required: true
+      schema: { $ref: "#/components/schemas/ObjectIdString" }
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: Rate limited
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    ObjectIdString:
+      type: string
+      pattern: "^[a-fA-F0-9]{24}$"
+
+    ActorRolePublic:
+      type: string
+      enum: [user, astrologer]
+
+    SessionType:
+      type: string
+      enum: [chat, audio, video]
+
+    SessionStatus:
+      type: string
+      enum: [pending, active, ended, cancelled, failed]
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          examples:
+            - WALLET_INSUFFICIENT
+            - ASTRO_BUSY
+            - ASTRO_OFFLINE
+            - INVALID_OTP
+            - FORBIDDEN
+        message: { type: string }
+        requestId: { type: string }
+
+    TokenPair:
+      type: object
+      required: [accessToken, refreshToken, expiresInSec]
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        expiresInSec: { type: integer, example: 900 }
+
+    TokenPairWithActor:
+      allOf:
+        - $ref: "#/components/schemas/TokenPair"
+        - type: object
+          required: [actor]
+          properties:
+            actor:
+              type: object
+              required: [id, role, isNew]
+              properties:
+                id: { $ref: "#/components/schemas/ObjectIdString" }
+                role: { $ref: "#/components/schemas/ActorRolePublic" }
+                isNew: { type: boolean }
+                status:
+                  type: string
+                  description: Astrologer onboarding status when role=astrologer
+                  enum: [pending, approved, rejected, suspended]
+
+    ProfileImage:
+      type: object
+      properties:
+        url: { type: string, format: uri }
+        key: { type: string }
+        mime: { type: string }
+
+    FamilyMember:
+      type: object
+      required: [id, relation, firstName, gender, dob]
+      properties:
+        id: { $ref: "#/components/schemas/ObjectIdString" }
+        relation: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        gender: { type: string }
+        dob: { type: string }
+        tob: { type: string }
+        birthPlace: { type: string }
+
+    FamilyMemberInput:
+      type: object
+      required: [relation, firstName, gender, dob]
+      properties:
+        relation: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        gender: { type: string }
+        dob: { type: string }
+        tob: { type: string }
+        birthPlace: { type: string }
+
+    User:
+      type: object
+      required:
+        - id
+        - mobile
+        - walletBalance
+        - isBlocked
+        - preferredLanguage
+        - family
+      properties:
+        id: { $ref: "#/components/schemas/ObjectIdString" }
+        firstName: { type: string }
+        lastName: { type: string }
+        gender: { type: string }
+        mobile: { type: string }
+        dob: { type: string }
+        tob: { type: string }
+        birthPlace: { type: string }
+        preferredLanguage:
+          type: array
+          items: { type: string }
+        appLanguage: { type: string }
+        walletBalance:
+          type: integer
+          description: Display cache (paise); prefer GET /v1/wallet for money UI
+        isBlocked: { type: boolean }
+        profileImage: { $ref: "#/components/schemas/ProfileImage" }
+        family:
+          type: array
+          items: { $ref: "#/components/schemas/FamilyMember" }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    UserPatch:
+      type: object
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        gender: { type: string }
+        dob: { type: string }
+        tob: { type: string }
+        birthPlace: { type: string }
+        preferredLanguage:
+          type: array
+          items: { type: string }
+        appLanguage: { type: string }
+        profileImage: { $ref: "#/components/schemas/ProfileImage" }
+        fcm: { type: object, additionalProperties: true }
+
+    AstrologerPublic:
+      type: object
+      required:
+        - id
+        - displayName
+        - priceTier
+        - isOnline
+        - isBusy
+        - ratingAvg
+        - ratingCount
+      properties:
+        id: { $ref: "#/components/schemas/ObjectIdString" }
+        displayName: { type: string }
+        bio: { type: string }
+        experienceYears: { type: integer }
+        skills:
+          type: array
+          items: { type: string }
+        languages:
+          type: array
+          items: { type: string }
+        specializations:
+          type: array
+          items: { type: string }
+        priceTier:
+          type: string
+          enum: [bronze, silver, gold]
+        rates:
+          $ref: "#/components/schemas/ResolvedRates"
+        isOnline: { type: boolean }
+        isBusy: { type: boolean }
+        isVerified: { type: boolean }
+        ratingAvg: { type: number }
+        ratingCount: { type: integer }
+        totalOrders: { type: integer }
+        profileImage: { $ref: "#/components/schemas/ProfileImage" }
+
+    ResolvedRates:
+      type: object
+      properties:
+        chatRatePerMinute: { type: integer }
+        callRatePerMinute: { type: integer }
+        videoRatePerMinute: { type: integer }
+        currency: { type: string, enum: [INR] }
+
+    AstrologerPrivate:
+      allOf:
+        - $ref: "#/components/schemas/AstrologerPublic"
+        - type: object
+          properties:
+            firstName: { type: string }
+            lastName: { type: string }
+            mobile: { type: string }
+            email: { type: string }
+            status:
+              type: string
+              enum: [pending, approved, rejected, suspended]
+            isBanned: { type: boolean }
+            walletBalance: { type: integer }
+
+    AstrologerPatch:
+      type: object
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        displayName: { type: string }
+        bio: { type: string }
+        experienceYears: { type: integer }
+        skills:
+          type: array
+          items: { type: string }
+        languages:
+          type: array
+          items: { type: string }
+        specializations:
+          type: array
+          items: { type: string }
+        email: { type: string }
+        profileImage: { $ref: "#/components/schemas/ProfileImage" }
+        fcm: { type: object, additionalProperties: true }
+
+    AstrologerList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AstrologerPublic" }
+        nextCursor: { type: string }
+
+    PriceTier:
+      type: object
+      required:
+        - code
+        - chatRatePerMinute
+        - callRatePerMinute
+        - videoRatePerMinute
+        - currency
+        - isActive
+      properties:
+        code:
+          type: string
+          enum: [bronze, silver, gold]
+        chatRatePerMinute: { type: integer }
+        callRatePerMinute: { type: integer }
+        videoRatePerMinute: { type: integer }
+        currency: { type: string, enum: [INR] }
+        isActive: { type: boolean }
+
+    Session:
+      type: object
+      required:
+        - id
+        - type
+        - userId
+        - astrologerId
+        - priceTier
+        - ratePerMinute
+        - status
+        - billedMinutes
+        - totalCharged
+      properties:
+        id: { $ref: "#/components/schemas/ObjectIdString" }
+        type: { $ref: "#/components/schemas/SessionType" }
+        userId: { $ref: "#/components/schemas/ObjectIdString" }
+        astrologerId: { $ref: "#/components/schemas/ObjectIdString" }
+        priceTier: { type: string }
+        ratePerMinute: { type: integer }
+        status: { $ref: "#/components/schemas/SessionStatus" }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: string, format: date-time }
+        endReason:
+          type: string
+          enum: [user, astrologer, low_balance, system, error]
+        durationSec: { type: integer }
+        billedMinutes: { type: integer }
+        totalCharged: { type: integer }
+        astrologerEarning: { type: integer }
+        platformFee: { type: integer }
+        chatRoomId: { type: string }
+        callId: { type: string }
+
+    SessionStartResponse:
+      type: object
+      required: [session, mediaToken, expiresInSec]
+      properties:
+        session: { $ref: "#/components/schemas/Session" }
+        mediaToken:
+          type: string
+          description: Short-lived JWT for chat/call join
+        expiresInSec: { type: integer }
+        chatRoomId: { type: string }
+        callId: { type: string }
+
+    SessionList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Session" }
+        nextCursor: { type: string }
+
+    Review:
+      type: object
+      required: [id, sessionId, userId, astrologerId, rating, createdAt]
+      properties:
+        id: { $ref: "#/components/schemas/ObjectIdString" }
+        sessionId: { $ref: "#/components/schemas/ObjectIdString" }
+        userId: { $ref: "#/components/schemas/ObjectIdString" }
+        astrologerId: { $ref: "#/components/schemas/ObjectIdString" }
+        rating: { type: integer }
+        comment: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    ReviewList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Review" }
+        nextCursor: { type: string }
+
+    WalletBalance:
+      type: object
+      required: [ownerType, ownerId, balance, held, currency]
+      properties:
+        ownerType:
+          type: string
+          enum: [user, astrologer]
+        ownerId: { $ref: "#/components/schemas/ObjectIdString" }
+        balance:
+          type: integer
+          description: Available paise
+        held:
+          type: integer
+          description: Reserved paise
+        currency: { type: string, enum: [INR] }
+
+    LedgerEntry:
+      type: object
+      required: [id, type, amount, balanceAfter, heldAfter, reason, createdAt]
+      properties:
+        id: { $ref: "#/components/schemas/ObjectIdString" }
+        type:
+          type: string
+          enum: [credit, debit, hold, release, capture]
+        amount: { type: integer }
+        balanceAfter: { type: integer }
+        heldAfter: { type: integer }
+        reason: { type: string }
+        refType: { type: string }
+        refId: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    LedgerList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/LedgerEntry" }
+        nextCursor: { type: string }
+
+    RechargeOrder:
+      type: object
+      required: [paymentOrderId, provider, amount, currency, providerPayload]
+      properties:
+        paymentOrderId: { $ref: "#/components/schemas/ObjectIdString" }
+        provider:
+          type: string
+          enum: [razorpay, cashfree]
+        amount: { type: integer }
+        currency: { type: string, enum: [INR] }
+        providerPayload:
+          type: object
+          additionalProperties: true
+          description: PSP-specific fields for the Flutter SDK
+
+    Hold:
+      type: object
+      required: [id, sessionId, amount, captured, released, status]
+      properties:
+        id: { $ref: "#/components/schemas/ObjectIdString" }
+        sessionId: { $ref: "#/components/schemas/ObjectIdString" }
+        amount: { type: integer }
+        captured: { type: integer }
+        released: { type: integer }
+        status:
+          type: string
+          enum: [open, closed]
+        balanceAfter: { type: integer }
+        heldAfter: { type: integer }

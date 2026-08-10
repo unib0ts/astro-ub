@@ -1,0 +1,16 @@
+# Astro Platform
+
+Node.js / Fastify backend for astrology consultation (Astrotalk-style).
+
+## Ignore
+
+node_modules/
+dist/
+build/
+.env
+.env.*
+!.env.example
+coverage/
+.turbo/
+*.log
+.DS_Store
